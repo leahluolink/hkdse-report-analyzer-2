@@ -1,7 +1,14 @@
+import sys
+import os
+from pathlib import Path
+
+# Add parent directory to path to import pdf_utils
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import pandas as pd
 import streamlit as st
 
-from pdf_utils import extract_mcq_analysis
+from pdf_utils import extract_mcq_analysis, convert_df_to_pdf, convert_df_to_styled_excel
 
 st.set_page_config(page_title="HKDSE Statistical Report Data Extraction | HKDSE學校統計報告 數據提取工具", page_icon="🧭", layout="wide")
 st.title("🎯 自訂多項選擇題分析 | Custom MCQ Analysis")
@@ -129,16 +136,16 @@ if not df_mcq_c.empty:
     step1_col, step2_col = st.columns([1, 1])
 
     with step1_col:
-        st.info("1️⃣ 建立自訂欄位 (最多 8 個) | Create Custom Fields (Maximum 8)")
+        st.info("1️⃣ 建立自訂欄位 (最多 6 個) | Create Custom Fields (Maximum 6)")
         st.caption("自訂欄位可用於為每題設定不同的分類，例如「試卷」、「題型」、「難度」等，以協助後續的篩選和排序。")
         with st.form("mcq_add_field_form", clear_on_submit=True):
             new_col = st.text_input("輸入新自訂欄位名稱 | Enter New Custom Field Name", key="new_col_input_mcq")
             submitted = st.form_submit_button("➕ 新增欄位 | Add Field")
             if submitted:
-                if new_col and new_col not in st.session_state.mcq_custom_cols and len(st.session_state.mcq_custom_cols) < 8:
+                if new_col and new_col not in st.session_state.mcq_custom_cols and len(st.session_state.mcq_custom_cols) < 6:
                     st.session_state.mcq_custom_cols.append(new_col)
                     st.session_state.mcq_col_options_history[new_col] = []
-                elif new_col and new_col not in st.session_state.mcq_custom_cols and len(st.session_state.mcq_custom_cols) >= 8:
+                elif new_col and new_col not in st.session_state.mcq_custom_cols and len(st.session_state.mcq_custom_cols) >= 6:
                     st.warning("⚠️ 超過欄位數量限制 Field limit exceeded.")
         
         if st.session_state.mcq_custom_cols:
@@ -325,6 +332,68 @@ if not df_mcq_c.empty:
                 styles[row.index.get_loc("Day schools Top Option")] = "color: #8b0000; font-weight: bold; font-style: italic; background-color: #ffcccc"
         return styles
 
+    def build_mcq_export_df(df, for_excel=False):
+        export_df = df.copy()
+        if not for_excel:
+            formatters = {
+                "Your school Correct %": lambda x: f"{x:.1f}%" if pd.notna(x) else "",
+                "Day schools Correct %": lambda x: f"{x:.1f}%" if pd.notna(x) else "",
+                "Your school A_%": lambda x: f"{x:.1f}" if pd.notna(x) else "",
+                "Your school B_%": lambda x: f"{x:.1f}" if pd.notna(x) else "",
+                "Your school C_%": lambda x: f"{x:.1f}" if pd.notna(x) else "",
+                "Your school D_%": lambda x: f"{x:.1f}" if pd.notna(x) else "",
+                "Day schools A_%": lambda x: f"{x:.1f}" if pd.notna(x) else "",
+                "Day schools B_%": lambda x: f"{x:.1f}" if pd.notna(x) else "",
+                "Day schools C_%": lambda x: f"{x:.1f}" if pd.notna(x) else "",
+                "Day schools D_%": lambda x: f"{x:.1f}" if pd.notna(x) else "",
+            }
+            for col, fn in formatters.items():
+                if col in export_df.columns:
+                    export_df[col] = export_df[col].apply(fn)
+        else:
+            for col in export_df.columns:
+                converted = pd.to_numeric(export_df[col], errors='coerce')
+                if not converted.isna().all():
+                    export_df[col] = converted
+        return export_df
+
+    def build_mcq_style_map(df):
+        style_map = {}
+        columns = list(df.columns)
+        for row_idx, row in df.iterrows():
+            if "Corr. Ans" in columns:
+                col_idx = columns.index("Corr. Ans")
+                style_map[(row_idx, col_idx)] = {"fill": "#d4edda"}
+            if "Your school Top Option" in columns:
+                col_idx = columns.index("Your school Top Option")
+                corr_ans = str(row.get("Corr. Ans", "")).replace("☑️", "").strip()
+                your_top = str(row.get("Your school Top Option", "")).strip()
+                if corr_ans and your_top and your_top != corr_ans:
+                    style_map[(row_idx, col_idx)] = {"fill": "#ffcccc", "font_color": "#8b0000", "bold": True}
+            if "Day schools Top Option" in columns:
+                col_idx = columns.index("Day schools Top Option")
+                corr_ans = str(row.get("Corr. Ans", "")).replace("☑️", "").strip()
+                day_top = str(row.get("Day schools Top Option", "")).strip()
+                if corr_ans and day_top and day_top != corr_ans:
+                    style_map[(row_idx, col_idx)] = {"fill": "#ffcccc", "font_color": "#8b0000", "bold": True}
+            if "Day School Attainment" in columns:
+                col_idx = columns.index("Day School Attainment")
+                attainment = row["Day School Attainment"]
+                if attainment == "High attainment":
+                    style_map[(row_idx, col_idx)] = {"fill": "#d4edda"}
+                elif attainment == "Intermediate attainment":
+                    style_map[(row_idx, col_idx)] = {"fill": "#e5dbf7"}
+                elif attainment == "Low attainment":
+                    style_map[(row_idx, col_idx)] = {"fill": "#ffe5cc"}
+            if "School-based Expected Attainment" in columns:
+                col_idx = columns.index("School-based Expected Attainment")
+                expected = row["School-based Expected Attainment"]
+                if isinstance(expected, str) and expected.startswith("Attained"):
+                    style_map[(row_idx, col_idx)] = {"fill": "#fff3b3", "font_color": "#2e7d32", "bold": True}
+                elif isinstance(expected, str) and expected.startswith("Below Expectation"):
+                    style_map[(row_idx, col_idx)] = {"fill": "#fff3b3", "font_color": "#8b0000"}
+        return style_map
+
     st.write("📊 **總覽表 (本表跟隨以上設定自動更新) | Overview Table (This table updates automatically based on the above settings)**")
     st.dataframe(
         df_mcq_display.style
@@ -352,6 +421,30 @@ if not df_mcq_c.empty:
             .apply(style_mcq_row, axis=1),
         use_container_width=True, hide_index=True
     )
+
+    export_df_pdf = build_mcq_export_df(df_mcq_display, for_excel=False)
+    export_df_excel = build_mcq_export_df(df_mcq_display, for_excel=True)
+    style_map = build_mcq_style_map(df_mcq_display)
+    excel_bytes = convert_df_to_styled_excel(export_df_excel, style_map, sheet_name="MCQ Overview")
+    pdf_bytes = convert_df_to_pdf(export_df_pdf, style_map, title="多項選擇題分析 | 總覽表 MCQ Analysis | Overview Table")
+
+    col_pdf, col_excel = st.columns(2)
+    with col_pdf:
+        st.download_button(
+            label="📄 下載 PDF 總覽表 | Download Overview PDF",
+            data=pdf_bytes,
+            file_name=f"{source_name.replace('.pdf', '')}_MCQOverview.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    with col_excel:
+        st.download_button(
+            label="📥 下載 Excel 總覽表 | Download Overview Excel",
+            data=excel_bytes,
+            file_name=f"{source_name.replace('.pdf', '')}_MCQOverview.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
 
     st.markdown("---")
     st.info("4️⃣ 篩選與排序分析 | Filter and Sort Analysis")
@@ -438,6 +531,37 @@ if not df_mcq_c.empty:
             .apply(style_mcq_row, axis=1),
         use_container_width=True, hide_index=True
     )
+
+    st.info("4️⃣ Step 4 匯出篩選結果 | Step 4 Export Filtered Results")
+    
+    # Build dynamic PDF title with filter and sort info
+    filter_info_mcq = []
+    for col, s_filters in active_filters_mcq.items():
+        if s_filters:
+            filter_info_mcq.append(f"{col}: {', '.join(map(str, s_filters))}")
+    filter_str_mcq = " | ".join(filter_info_mcq) if filter_info_mcq else "無篩選 | No filters"
+    pdf_title_mcq = f"多項選擇題分析 | MCQ Analysis | {filter_str_mcq} | Sort by {sort_by_mcq} {sort_order_mcq}"
+    
+    filtered_export_df = build_mcq_export_df(final_mcq_df, for_excel=True)
+    filtered_export_pdf = convert_df_to_pdf(build_mcq_export_df(final_mcq_df, for_excel=False), build_mcq_style_map(final_mcq_df), title=pdf_title_mcq)
+    filtered_export_excel = convert_df_to_styled_excel(filtered_export_df, build_mcq_style_map(final_mcq_df), sheet_name="MCQ Filtered")
+    step4_pdf_col, step4_excel_col = st.columns(2)
+    with step4_pdf_col:
+        st.download_button(
+            label="📄 下載 Step 4 PDF 篩選表 | Download Step 4 Filtered PDF",
+            data=filtered_export_pdf,
+            file_name=f"{source_name.replace('.pdf', '')}_MCQFiltered.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    with step4_excel_col:
+        st.download_button(
+            label="📥 下載 Step 4 Excel 篩選表 | Download Step 4 Filtered Excel",
+            data=filtered_export_excel,
+            file_name=f"{source_name.replace('.pdf', '')}_MCQFiltered.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
 else:
     st.error("找不到可用的項目分析資料。 | No MCQ analysis data available.")
 
