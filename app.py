@@ -10,16 +10,16 @@ from pdf_utils import convert_df_to_excel, extract_item_analysis, extract_latest
 # ==========================================
 # 頁面設定 / Page Configuration
 # ==========================================
-st.set_page_config(page_title="HKDSE Statistical Report Data Conversion | HKDSE學校統計報告 數據轉換工具", page_icon="🔁", layout="wide", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="HKDSE Statistical Report Data Extraction | HKDSE學校統計報告 數據提取工具", page_icon="🧭", layout="wide", initial_sidebar_state="collapsed")
 st.title(
     """
-📊 HKDSE學校統計報告 數據轉換與分析工具 
-# HKDSE School Statistical Report Data Conversion and Analysis Tool
+HKDSE學校統計報告 數據提取與分析工具 
+# HKDSE School Statistical Report Data Extraction and Analysis Tool
 """
 )
 st.markdown(
     """
-本工具將自動提取考評局 PDF 報告中的數據，並提供題目標記與分析功能。
+本工具將提取考評局 PDF 報告中的數據，並提供題目標記與分析功能。
 
 This tool automatically extracts data from the HKDSE PDF reports and provides question tagging and analysis features.
 """
@@ -46,6 +46,23 @@ def cache_processed_data(uploaded_file):
     st.session_state['processed_exam_year'] = exam_year
     return True
 
+
+def build_extraction_status_message():
+    item_df = st.session_state.get('processed_item_df')
+    mcq_df = st.session_state.get('processed_mcq_df')
+    total_df = st.session_state.get('processed_total_df')
+
+    def status(label_cn, label_en, condition):
+        if condition:
+            return f"✅ {label_cn}提取完成 | {label_en} extraction completed"
+        return f"❌ {label_cn}提取失敗 | {label_en} extraction failed"
+
+    return [
+        status("總數表格", "Total Table", isinstance(total_df, pd.DataFrame) and not total_df.empty),
+        status("項目分析表格", "Item Analysis Table", isinstance(item_df, pd.DataFrame) and not item_df.empty),
+        status("多項選擇題表格", "MCQ Analysis Table", isinstance(mcq_df, pd.DataFrame) and not mcq_df.empty),
+    ]
+
 # ==========================================
 # 頂部：共用上傳區 / Top: Global Upload
 # ==========================================
@@ -56,42 +73,35 @@ if global_file is not None:
     st.session_state['last_uploaded_file'] = global_file
     st.session_state['source_pdf_name'] = global_file.name
     st.session_state['source_pdf_bytes'] = global_file.getvalue()
+    current_file = global_file
+else:
+    current_file = st.session_state.get('last_uploaded_file')
 
-col_btn = st.columns([1])[0]
-with col_btn:
-    if st.button("🚀 開始轉換 | Start Converting", type="primary", use_container_width=True):
-        current_file = global_file if global_file is not None else st.session_state.get('last_uploaded_file')
-        if current_file is None:
-            st.warning("請先上載 PDF 檔案 | Please upload the PDF report first.")
-        else:
-            with st.spinner("正在處理資料... | Processing data..."):
-                cache_processed_data(current_file)
-            st.success("✅ 轉換完成！| Conversion completed!")
+if current_file is not None:
+    current_bytes = current_file.getvalue() if hasattr(current_file, 'getvalue') else bytes(current_file)
+    previous_bytes = st.session_state.get('processed_source_pdf_bytes')
+    if previous_bytes != current_bytes:
+        with st.spinner("正在獲取資料... | Fetching data..."):
+            cache_processed_data(current_file)
+            st.session_state['processed_source_pdf_bytes'] = current_bytes
+        status_lines = build_extraction_status_message()
+        for line in status_lines:
+            st.success(line)
 
-current_file = global_file if global_file is not None else st.session_state.get('last_uploaded_file')
-st.caption("""
-🛡️ 本工具僅在記憶體中暫存 PDF，處理後立即刪除，不會儲存至硬碟或雲端。
-
-This tool only temporarily stores the PDF in memory, deletes it immediately after processing, and does not save it to disk or cloud.
-"""
-)
-st.markdown("---")
-
-
-# ==========================================
 # 建立主畫面三個標籤頁 (Tabs) 入口
 # ==========================================
-tab0, tab1, tab2 = st.tabs(["📊 總數分析 Total Analysis", "📝 項目分析報告 Item Analysis Report", "✅ 多項選擇題報告 MCQ Analysis Report"])
+tab0, tab1, tab2 = st.tabs(["📊 總數表格 Total Table", "📝 項目分析表格 Item Analysis Table", "✅ 多項選擇題表格 MCQ Analysis Table"])
 
 # -----------------
 # 標籤頁 0 的內容 / Tab 0 Content
 # -----------------
 with tab0:
-    st.subheader("📊 總數 | Total Analysis Conversion")
+    st.subheader("📊 總數數據提取 Total Data Extraction")
     col_t1, col_t2 = st.columns([2, 5])
     with col_t1:
         st.info("""
         💡 **本區功能：** 自動提取最新年份的「總數」數據。
+                
         **Function:** Automatically extracts the latest year's 'Total' data.
         """)
         if os.path.exists("example3_main.png"):
@@ -102,7 +112,7 @@ with tab0:
         if current_file is None:
             st.warning("👆 請先在上方上載 PDF 檔案 | Please upload the PDF report in above session.")
         else:
-            with st.spinner("系統正在處理檔案，請稍候... | Processing file, please wait..."):
+            with st.spinner("正在獲取資料... | Fetching data..."):
                 try:
                     current_file.seek(0)
                     file_bytes = current_file.getvalue()
@@ -215,11 +225,11 @@ with tab0:
                                     ds_pct = "0.0%"
                                 
                                 pivot_df = pd.concat([pivot_df, pd.DataFrame({
-                                    "等級": [grade],
-                                    "貴校人數": [ys_count],
-                                    "貴校百分比": [ys_pct],
-                                    "日校人數": [ds_count],
-                                    "日校百分比": [ds_pct]
+                                    "等級 Level": [grade],
+                                    "貴校人數 Your School No.": [ys_count],
+                                    "貴校百分比 Your School %": [ys_pct],
+                                    "日校人數 Day Schools No.": [ds_count],
+                                    "日校百分比 Day Schools %": [ds_pct]
                                 })], ignore_index=True)
                             
                             # 處理 UNCL - 直接使用原始數字，計算百分比（不參與減法）
@@ -231,31 +241,32 @@ with tab0:
                                 uncl_ds_pct = f"{(uncl_ds_count / attendance_ds) * 100:.1f}%"
                                 
                                 pivot_df = pd.concat([pivot_df, pd.DataFrame({
-                                    "等級": ["UNCL"],
-                                    "貴校人數": [uncl_ys_count],
-                                    "貴校百分比": [uncl_ys_pct],
-                                    "日校人數": [uncl_ds_count],
-                                    "日校百分比": [uncl_ds_pct]
+                                    "等級 Level": ["UNCL"],
+                                    "貴校人數 Your School No.": [uncl_ys_count],
+                                    "貴校百分比 Your School %": [uncl_ys_pct],
+                                    "日校人數 Day Schools No.": [uncl_ds_count],
+                                    "日校百分比 Day Schools %": [uncl_ds_pct]
                                 })], ignore_index=True)
                             
                             # 轉置數據表
-                            transposed_df = pivot_df.set_index("等級").T
+                            transposed_df = pivot_df.set_index("等級 Level").T
                             st.dataframe(transposed_df, use_container_width=True)
                         else:
                             st.warning("⚠️ 無法計算百分比，缺少出席人數資料。 | Unable to calculate percentages due to missing attendance data.")
                 except Exception as e:
-                    st.error(f"❌ 處理檔案時發生錯誤：{str(e)} | Error processing file: {str(e)}")
+                    st.error(f"❌ 發生錯誤 | Error processing file: {str(e)}")
 
 # -----------------
 # 標籤頁 1 的內容 / Tab 1 Content
 # -----------------
 with tab1:
-    st.subheader("📝 項目分析報告轉換 | Item Analysis Conversion")
+    st.subheader("📝 項目分析數據提取 Item Report Data Extraction")
     col1, col2 = st.columns([2, 5])
     with col1:
         st.info("""
         💡 **本區適用於以下格式的報告：**
         表格橫向列出「平均分 Mean」、「標準差 S.D.」等數據。
+                
         **Applicable for reports formatted like:** The table horizontally displays data such as 'Mean' and 'S.D.'.
         """)
         if os.path.exists("example1_item.png"):
@@ -266,7 +277,7 @@ with tab1:
         if current_file is None:
             st.warning("👆 請先在上方上載 PDF 檔案 | Please upload a PDF file above first.")
         else:
-            with st.spinner("系統正在處理檔案，請稍候... | Processing file, please wait..."):
+            with st.spinner("正在獲取資料... | Fetching data..."):
                 try:
                     current_file.seek(0)
                     file_bytes = current_file.getvalue()
@@ -275,7 +286,7 @@ with tab1:
                         st.error("❌ 無法提取數據！請確認你上載的是否為正確的「項目分析報告」。 \n *Failed to extract data! Please ensure you uploaded the correct 'Item Analysis Report'.*")
                     else:
                         st.success(f"✅ 提取成功！共獲取 {len(df_item)} 行數據。 \n *Extraction successful! {len(df_item)} rows retrieved.*")
-                        if st.button("📌 進入自訂項目分析 | Start Custom Item Analysis", type="primary", use_container_width=True, key="btn_item_app"):
+                        if st.button("🔎 進入自訂項目分析 | Start Custom Item Analysis", type="primary", use_container_width=True, key="btn_item_app"):
                             st.switch_page("pages/1_custom_item_app.py")
                         st.subheader("📋 數據概覽 | Data Preview")
                         df_item_display = df_item.drop(columns=["row_index"]) if "row_index" in df_item.columns else df_item
@@ -289,18 +300,19 @@ with tab1:
                             type="primary"
                         )
                 except Exception as e:
-                    st.error(f"❌ 處理檔案時發生錯誤 | Error processing file：{str(e)}")
+                    st.error(f"❌ 發生錯誤 | Error processing file: {str(e)}")
 
 # -----------------
 # 標籤頁 2 的內容 / Tab 2 Content
 # -----------------
 with tab2:
-    st.subheader("✅ 多項選擇題報告轉換 | MCQ Analysis Conversion")
+    st.subheader("✅ 多項選擇題數據提取 MCQ Analysis Data Extraction")
     col3, col4 = st.columns([2, 5])
     with col3:
         st.info("""
         💡 **本區適用於以下格式的報告：**
         表格列出「A, B, C, D」選項的選擇人數，並附有 ☑️ 標記顯示正確答案。
+                
         **Applicable for reports formatted like:** The table lists the number of students for options 'A, B, C, D' and uses a ☑️ mark to indicate the correct answer.
         """)
         if os.path.exists("example2_mcq.png"):
@@ -311,7 +323,7 @@ with tab2:
         if current_file is None:
             st.warning("👆 請先在上方上載 PDF 檔案 | Please upload a PDF file above first.")
         else:
-            with st.spinner("系統正在處理檔案，請稍候... | Processing file, please wait..."):
+            with st.spinner("正在獲取資料... | Fetching data..."):
                 try:
                     current_file.seek(0)
                     file_bytes = current_file.getvalue()
@@ -320,7 +332,7 @@ with tab2:
                         st.error("❌ 無法提取數據！請確認你上載的是否為正確的「多項選擇題分析報告」。 \n *Failed to extract data! Please ensure you uploaded the correct 'MCQ Analysis Report'.*")
                     else:
                         st.success(f"✅ 提取成功！共獲取 {len(df_mcq)} 題的數據。 \n *Extraction successful! Data for {len(df_mcq)} questions retrieved. *")
-                        if st.button("🎯 進入自訂多項選擇題分析 | Start Custom MCQ Analysis", type="primary", use_container_width=True, key="btn_mcq_app"):
+                        if st.button("🔎 進入自訂多項選擇題分析 | Start Custom MCQ Analysis", type="primary", use_container_width=True, key="btn_mcq_app"):
                             st.switch_page("pages/2_custom_mcq_app.py")
                         st.subheader("📋 數據概覽 | Data Preview")
                         df_mcq_display = df_mcq.drop(columns=["row_index"]) if "row_index" in df_mcq.columns else df_mcq
@@ -334,4 +346,4 @@ with tab2:
                             type="primary"
                         )
                 except Exception as e:
-                    st.error(f"❌ 處理檔案時發生錯誤 | Error processing file：{str(e)}")
+                    st.error(f"❌ 發生錯誤 | Error processing file: {str(e)}")
